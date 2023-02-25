@@ -1,0 +1,201 @@
+---
+title: "EV Charging Dashbaord"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    #theme: cerulean
+    #vertical_layout: fill
+  runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+#library(shiny)
+library(plotly)
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+library(leaflet)
+
+allData<-read_csv(file="https://raw.githubusercontent.com/rsikder007/msds_capstone/main/chrgDataSet.csv")
+
+zipCodes<-factor(allData$Zip_Postal_Code)
+country<-factor(allData$Country)
+allData$Charge_start_Date_and_Time<-ymd_hms(allData$Charge_start_Date_and_Time)
+allData$Charge_end_Date_and_Time<-ymd_hms(allData$Charge_end_Date_and_Time)
+
+#use data with twh greater than zero
+allDataClean<-subset(allData,allData$Total_kWh>0)
+
+```
+
+```{r allData}
+
+
+```
+
+Charging Station Location 
+=======================================================================
+Column {.sidebar data-width=250}
+-----------------------------------------------------------------------
+
+```{r input_country} 
+getData4Country <- eventReactive(input$country, {
+    countryData<-subset(allDataClean,allDataClean$Country==input$country)
+    countryData
+  })
+
+selectInput("country", label = "Select Region:", choices = levels(country))
+
+```
+
+
+
+Row
+-----------------------------------------------------------------------
+### Total number of zipcode monitored 
+
+```{r}
+renderValueBox({
+  if(input$country=="United Kingdom") {
+    val<-2
+  } else {
+    val<-5
+  }
+  valueBox(
+    value = val,
+    icon = "ion-ios-location",
+    color="#c6e2ff"
+  )
+})
+```
+
+### Number of chargers reporting 
+```{r}
+renderValueBox({
+  if(input$country=="United Kingdom") {
+    valchrg<-14
+  } else {
+    valchrg<-20
+  }
+  valueBox(
+    value = valchrg,
+    icon = "fa-bolt",
+    color="#77dd77"
+  )
+})
+```
+
+Row {data-width=700}
+-----------------------------------------------------------------------
+### Overview of charging locations 
+
+```{r}
+renderLeaflet({
+  
+#mapData <- ne_states(country=input$country,returnclass = "sf")
+#plot_ly(mapData, color = I("gray90"), stroke = I("black"), span = I(1))
+  #addProviderTiles("Esri.WorldGrayCanvas")
+  ukmap <- leaflet() %>%
+    addTiles() %>% # Add default OpenStreetMap map tiles
+    addMarkers(lng=-0.17145, lat=51.543239, popup="Zip Code: EN4 0AD <br> Number of charging stations: 8") %>%
+    addMarkers(lng=-0.150127, lat=51.6496, popup="Zip Code: EN4 0AH <br> Number of charging stations: 6") %>%
+    setView(lng=-0.1279, lat=51.5077, zoom=7)
+  
+  usmap <- leaflet() %>%
+    addTiles() %>% # Add default OpenStreetMap map tiles
+    addMarkers(lng=-105.20013, lat=40.04859, popup="Zip Code: 80301 <br> Number of charging stations: 4") %>%
+    addMarkers(lng=-105.3691, lat=40.03893, popup="Zip Code: 80302 <br> Number of charging stations: 3") %>%
+    addMarkers(lng=-105.2078, lat=40.0005, popup="Zip Code: 80303 <br> Number of charging stations: 8") %>%
+    addMarkers(lng=-105.29195, lat=40.045179, popup="Zip Code: 80304 <br> Number of charging stations: 3") %>%
+    addMarkers(lng=-105.2492, lat=39.97469, popup="Zip Code: 80305 <br> Number of charging stations: 2") %>%
+    setView(lng =-105.20013, lat=40.04859, zoom=7)
+  
+  if(input$country=="United Kingdom") {
+    ukmap
+  } else {
+    usmap
+  }
+  
+    
+})
+```
+
+Data By Zip Code
+=======================================================================
+
+
+Column {.sidebar data-width=250}
+------------------
+```{r input_layout} 
+getData4Zip <- eventReactive(input$zip_Codes, {
+    zipData<-subset(allDataClean,allDataClean$Zip_Postal_Code==input$zip_Codes)
+    zipData
+  })
+
+selectInput("zip_Codes", label = "Select Zipcode:", choices = levels(zipCodes))
+
+```
+
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### kWh Demand Per Day
+
+```{r}
+
+renderPlotly({
+data<-getData4Zip()
+data$eventDate<-date(data$Charge_end_Date_and_Time)
+kwhDmd<- data %>%
+  group_by(eventDate) %>%
+  summarise(totalKwh=sum(Total_kWh))
+#m <- lm(totalKwh~eventDate,data = kwhDmd)
+ks1 = ksmooth(kwhDmd$eventDate, kwhDmd$totalKwh, "normal", 20, x.points=kwhDmd$eventDate)
+line.fmt = list(dash="solid", width = 1.5, color=NULL)
+kwhDmdplt <- plot_ly(x = kwhDmd$eventDate, y = kwhDmd$totalKwh, type = 'scatter', mode = 'lines',name="Total kWh") %>%
+   layout(plot_bgcolor = "#e5ecf6", xaxis = list(title = 'Date'), 
+         yaxis = list(title = 'Total kWh/Day'))
+ kwhDmdplt<-add_lines(kwhDmdplt,x=ks1$x,y=ks1$y,line=line.fmt, name="Trend")
+ kwhDmdplt
+})
+
+```
+
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Typical Charge Start Hour Of The Day
+
+```{r}
+renderPlotly({
+data<-getData4Zip()
+# hist<- plot_ly(x = data$ChargeEndHourOfDay, type = "histogram",  marker = list(color = "#008ae6",
+ #                           line = list(color = "darkgray",width = 1))) %>%
+  # layout(title = 'Histogram:', plot_bgcolor = "#e5ecf6", xaxis = list(title = 'Hour Of The Day'), 
+   #      yaxis = list(title = 'Counts'))
+dataStrt<-data %>%
+  count(ChargeStartHourOfDay)
+ linepltStrt <- plot_ly(x = dataStrt$ChargeStartHourOfDay, y = dataStrt$n, type = 'scatter', mode = 'lines') %>%
+   layout(plot_bgcolor = "#e5ecf6", xaxis = list(title = 'Hour Of The Day'), 
+         yaxis = list(title = 'Number Of Charge Events'))
+ linepltStrt
+})
+```
+
+### Typical Charge End Hour Of The Day
+
+```{r}
+renderPlotly({
+data<-getData4Zip()
+dataEnd<-data %>%
+  count(ChargeEndHourOfDay)
+linepltEnd <- plot_ly(x = dataEnd$ChargeEndHourOfDay, y = dataEnd$n, type = 'scatter', mode = 'lines') %>%
+   layout(plot_bgcolor = "#e5ecf6", xaxis = list(title = 'Hour Of The Day'), 
+         yaxis = list(title = 'Number Of Charge Events'))
+ linepltEnd
+})
+```
+
